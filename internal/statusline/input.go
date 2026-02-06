@@ -1,0 +1,52 @@
+package statusline
+
+type Input struct {
+	HookEventName  string        `json:"hook_event_name"`
+	SessionID      string        `json:"session_id"`
+	TranscriptPath string        `json:"transcript_path"`
+	CWD            string        `json:"cwd"`
+	Version        string        `json:"version"`
+	Model          Model         `json:"model"`
+	Workspace      Workspace     `json:"workspace"`
+	OutputStyle    OutputStyle   `json:"output_style"`
+	Cost           Cost          `json:"cost"`
+	ContextWindow  ContextWindow `json:"context_window"`
+}
+
+type Model struct {
+	ID          string `json:"id"`
+	DisplayName string `json:"display_name"`
+}
+
+type Workspace struct {
+	CurrentDir string `json:"current_dir"`
+	ProjectDir string `json:"project_dir"`
+}
+
+type OutputStyle struct {
+	Name string `json:"name"`
+}
+
+type Cost struct {
+	TotalCostUSD       float64 `json:"total_cost_usd"`
+	TotalDurationMS    float64 `json:"total_duration_ms"`
+	TotalAPIDurationMS float64 `json:"total_api_duration_ms"`
+	TotalLinesAdded    int     `json:"total_lines_added"`
+	TotalLinesRemoved  int     `json:"total_lines_removed"`
+}
+
+type ContextWindow struct {
+	TotalInputTokens    int           `json:"total_input_tokens"`
+	TotalOutputTokens   int           `json:"total_output_tokens"`
+	ContextWindowSize   int           `json:"context_window_size"`
+	UsedPercentage      float64       `json:"used_percentage"`
+	RemainingPercentage float64       `json:"remaining_percentage"`
+	CurrentUsage        *CurrentUsage `json:"current_usage"`
+}
+
+type CurrentUsage struct {
+	InputTokens              int `json:"input_tokens"`
+	OutputTokens             int `json:"output_tokens"`
+	CacheCreationInputTokens int `json:"cache_creation_input_tokens"`
+	CacheReadInputTokens     int `json:"cache_read_input_tokens"`
+}
