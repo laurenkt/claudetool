@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/laurenkt/claudetool/internal/ansi"
+	"github.com/laurenkt/claudetool/internal/ghutil"
 	"github.com/laurenkt/claudetool/internal/gitutil"
 	"github.com/laurenkt/claudetool/internal/pathutil"
 )
@@ -29,9 +30,14 @@ func Run(stdin io.Reader, stdout io.Writer) error {
 		parts = append(parts, ansi.Wrap(ansi.Bold, pathutil.Shorten(dir, 30)))
 	}
 
-	// Git branch (cyan)
+	// Merged PR indicator + Git branch (cyan)
+	var branch string
 	if dir != "" {
-		if branch := gitutil.Branch(dir); branch != "" {
+		branch = gitutil.Branch(dir)
+		if branch != "" && ghutil.BranchPRMerged(dir, branch) {
+			parts = append(parts, "✅")
+		}
+		if branch != "" {
 			parts = append(parts, ansi.Wrap(ansi.FgCyan, branch))
 		}
 	}

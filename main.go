@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 
+	"github.com/laurenkt/claudetool/internal/hook"
 	"github.com/laurenkt/claudetool/internal/statusline"
 )
 
@@ -21,8 +22,7 @@ func main() {
 			os.Exit(1)
 		}
 	case "hook":
-		fmt.Fprintln(os.Stderr, "hook: not yet implemented")
-		os.Exit(1)
+		os.Exit(hook.Run(os.Args[2:], os.Stdin, os.Stdout, os.Stderr))
 	default:
 		fmt.Fprintf(os.Stderr, "unknown command: %s\n", os.Args[1])
 		os.Exit(1)
