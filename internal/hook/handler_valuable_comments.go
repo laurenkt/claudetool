@@ -43,4 +43,6 @@ A comment ADDS NO VALUE when:
 - It describes a rule that belongs in, or is already enforced by, a validator — a proto field option (e.g. a buf.validate / protoc-gen-validate constraint) or a Go struct-tag validator annotation ("// must not be empty", "// max 32 chars") — the constraint should live on the field, not in prose.
 - It is boilerplate or filler ("// TODO" with no content, banner comments).
 
+Be suspicious of needlessly long comments. A four-plus line comment needs a really good reason to exist — it should be giving genuinely valuable context (a non-obvious rationale, a subtle invariant, a worked example, a doc/spec reference). If a long comment is just verbose restatement, padding, or could be said in a line, flag it to be tightened.
+
 Be conservative. Only flag a comment when it clearly falls in the NO VALUE list. If a comment is borderline, or you lack surrounding context to be sure it is redundant, treat it as fine. A doc comment on an exported identifier (required by lint) should be flagged only if it merely restates the name — never just for existing.`
