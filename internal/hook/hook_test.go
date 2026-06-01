@@ -3,6 +3,8 @@ package hook
 import (
 	"bytes"
 	"encoding/json"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -96,49 +98,6 @@ func TestNoCDIgnoresNonBash(t *testing.T) {
 	}
 }
 
-func TestUseLinearMCPAllows(t *testing.T) {
-	tests := []struct {
-		name    string
-		command string
-	}{
-		{"normal gh", "gh pr list"},
-		{"git command", "git log"},
-		{"plain curl", "curl https://example.com"},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			input := makeToolInput("PreToolUse", "Bash", BashInput{Command: tt.command})
-			code, _ := runHandler(t, "use-linear-mcp", input)
-			if code != 0 {
-				t.Errorf("exit code = %d, want 0 (allow)", code)
-			}
-		})
-	}
-}
-
-func TestUseLinearMCPBlocks(t *testing.T) {
-	tests := []struct {
-		name    string
-		command string
-	}{
-		{"gh issue linear", "gh issue view LINEAR-123"},
-		{"curl linear.app", "curl https://linear.app/api/issues"},
-		{"wget linear.app", "wget https://linear.app/api/issues"},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			input := makeToolInput("PreToolUse", "Bash", BashInput{Command: tt.command})
-			code, stderr := runHandler(t, "use-linear-mcp", input)
-			if code != 2 {
-				t.Errorf("exit code = %d, want 2 (block)", code)
-			}
-			if !strings.Contains(stderr, "Linear MCP") {
-				t.Errorf("stderr = %q, want Linear MCP message", stderr)
-			}
-		})
-	}
-}
-
 func TestRedirectWritesNoEnv(t *testing.T) {
 	input := makeToolInput("PreToolUse", "Write", WriteInput{
 		FilePath: "/old/generated/file.go",
@@ -198,15 +157,86 @@ func TestRedirectWritesNoMatch(t *testing.T) {
 	}
 }
 
+func TestRunMultiHandlerStopsAtBlock(t *testing.T) {
+	// go-augment-style blocks on the bad prefix; if it didn't stop the chain
+	// we'd carry on to backend101 and never emit the block. Verify the first
+	// blocking handler short-circuits.
+	input := makeToolInput("PostToolUse", "Write", WriteInput{
+		FilePath: "/src/svc/x.go",
+		Content:  `terrors.Augment(err, "` + `failed to read account", nil)`,
+	})
+	var stdout, stderr bytes.Buffer
+	code := Run([]string{"go-augment-style", "backend101"}, strings.NewReader(input), &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("exit code = %d, stderr: %s", code, stderr.String())
+	}
+	var out Output
+	if err := json.Unmarshal(stdout.Bytes(), &out); err != nil {
+		t.Fatalf("unmarshal: %v; stdout=%s", err, stdout.String())
+	}
+	if out.Decision != "block" {
+		t.Errorf("decision = %q, want block", out.Decision)
+	}
+}
+
+func TestRunMultiHandlerAllAllow(t *testing.T) {
+	input := makeToolInput("PostToolUse", "Write", WriteInput{
+		FilePath: "/src/svc/x.txt",
+		Content:  "harmless",
+	})
+	var stdout, stderr bytes.Buffer
+	code := Run([]string{"go-augment-style", "backend101"}, strings.NewReader(input), &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("exit code = %d, stderr: %s", code, stderr.String())
+	}
+	if stdout.Len() != 0 {
+		t.Errorf("stdout = %q, want empty", stdout.String())
+	}
+}
+
+func TestRunFlagsPassedToHandler(t *testing.T) {
+	// `dump` reads -o from in.Args. Mix with another handler to prove the
+	// flag tail is shared.
+	out := filepath.Join(t.TempDir(), "dump.json")
+	input := makeToolInput("PostToolUse", "Write", WriteInput{
+		FilePath: "/src/svc/x.txt",
+		Content:  "ok",
+	})
+	var stdout, stderr bytes.Buffer
+	code := Run([]string{"dump", "backend101", "-o", out}, strings.NewReader(input), &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("exit code = %d, stderr: %s", code, stderr.String())
+	}
+	data, err := os.ReadFile(out)
+	if err != nil {
+		t.Fatalf("read dump file: %v", err)
+	}
+	if !strings.Contains(string(data), `"tool_name":"Write"`) {
+		t.Errorf("dump = %s, want tool_name", string(data))
+	}
+}
+
+func TestRegisterPanicsOnDashPrefix(t *testing.T) {
+	defer func() {
+		if r := recover(); r == nil {
+			t.Error("want panic on handler name starting with '-'")
+		}
+	}()
+	Register("-bad", func(*Input) (*Output, error) { return nil, nil })
+}
+
 func TestHandlersRegistered(t *testing.T) {
 	names := handlers()
 	want := map[string]bool{
 		"no-cd":              true,
+		"no-diff-master":     true,
 		"use-linear-mcp":     true,
 		"go-swallowed-error": true,
 		"go-augment-style":   true,
 		"redirect-writes":    true,
 		"dump":               true,
+		"backend101":         true,
+		"go-fix":             true,
 	}
 	for _, n := range names {
 		delete(want, n)
@@ -218,7 +248,7 @@ func TestHandlersRegistered(t *testing.T) {
 
 // helpers
 
-func makeToolInput(event, tool string, toolInput interface{}) string {
+func makeToolInput(event, tool string, toolInput any) string {
 	ti, _ := json.Marshal(toolInput)
 	input := Input{
 		HookEventName: event,

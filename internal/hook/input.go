@@ -6,13 +6,13 @@ import "encoding/json"
 // Common fields are always present; event-specific fields are decoded per-event.
 // RawJSON contains the original unparsed bytes (set by Run, not from JSON).
 type Input struct {
-	RawJSON json.RawMessage `json:"-"`
-	Args    []string        `json:"-"`
-	SessionID      string `json:"session_id"`
-	TranscriptPath string `json:"transcript_path"`
-	CWD            string `json:"cwd"`
-	PermissionMode string `json:"permission_mode"`
-	HookEventName  string `json:"hook_event_name"`
+	RawJSON        json.RawMessage `json:"-"`
+	Args           []string        `json:"-"`
+	SessionID      string          `json:"session_id"`
+	TranscriptPath string          `json:"transcript_path"`
+	CWD            string          `json:"cwd"`
+	PermissionMode string          `json:"permission_mode"`
+	HookEventName  string          `json:"hook_event_name"`
 
 	// Tool events (PreToolUse, PostToolUse, PostToolUseFailure, PermissionRequest)
 	ToolName  string          `json:"tool_name,omitempty"`
@@ -72,4 +72,10 @@ type EditInput struct {
 	OldString  string `json:"old_string"`
 	NewString  string `json:"new_string"`
 	ReplaceAll bool   `json:"replace_all,omitempty"`
+}
+
+// WebFetchInput is the tool_input for WebFetch tool calls.
+type WebFetchInput struct {
+	URL    string `json:"url"`
+	Prompt string `json:"prompt,omitempty"`
 }

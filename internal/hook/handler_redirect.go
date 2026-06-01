@@ -43,16 +43,16 @@ func handleRedirectWrites(in *Input) (*Output, error) {
 	newPath := filepath.Join(to, filePath[len(from):])
 
 	// Build updatedInput with the redirected path
-	var toolInput map[string]interface{}
+	var toolInput map[string]any
 	if err := json.Unmarshal(in.ToolInput, &toolInput); err != nil {
 		return nil, nil
 	}
 	toolInput["file_path"] = newPath
 
 	// For Edit with edits array (MultiEdit), redirect each sub-edit too
-	if edits, ok := toolInput["edits"].([]interface{}); ok {
+	if edits, ok := toolInput["edits"].([]any); ok {
 		for _, e := range edits {
-			if edit, ok := e.(map[string]interface{}); ok {
+			if edit, ok := e.(map[string]any); ok {
 				if fp, ok := edit["file_path"].(string); ok {
 					fp = filepath.Clean(fp)
 					if strings.HasPrefix(fp, from) {

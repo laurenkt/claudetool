@@ -32,7 +32,7 @@ func handleNoCD(in *Input) (*Output, error) {
 // hasCD checks whether a shell command string contains a cd invocation.
 func hasCD(cmd string) bool {
 	// Check each line/statement for cd at the start or after && / || / ; / |
-	for _, line := range strings.Split(cmd, "\n") {
+	for line := range strings.SplitSeq(cmd, "\n") {
 		line = strings.TrimSpace(line)
 		if line == "cd" || strings.HasPrefix(line, "cd ") || strings.HasPrefix(line, "cd\t") {
 			return true

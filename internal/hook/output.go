@@ -21,9 +21,9 @@ type HookSpecificOutput struct {
 	HookEventName string `json:"hookEventName"`
 
 	// PreToolUse
-	PermissionDecision       string                 `json:"permissionDecision,omitempty"`
-	PermissionDecisionReason string                 `json:"permissionDecisionReason,omitempty"`
-	UpdatedInput             map[string]interface{} `json:"updatedInput,omitempty"`
+	PermissionDecision       string         `json:"permissionDecision,omitempty"`
+	PermissionDecisionReason string         `json:"permissionDecisionReason,omitempty"`
+	UpdatedInput             map[string]any `json:"updatedInput,omitempty"`
 
 	// PreToolUse, PostToolUse, SessionStart, UserPromptSubmit, etc.
 	AdditionalContext string `json:"additionalContext,omitempty"`
