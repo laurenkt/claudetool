@@ -42,6 +42,7 @@ A comment ADDS NO VALUE when:
 - It just restates the name of the thing ("// UserID is the user ID", "// Start starts the server", "// constructor for Foo").
 - It describes a rule that belongs in, or is already enforced by, a validator — a proto field option (e.g. a buf.validate / protoc-gen-validate constraint) or a Go struct-tag validator annotation ("// must not be empty", "// max 32 chars") — the constraint should live on the field, not in prose.
 - It is boilerplate or filler ("// TODO" with no content, banner comments).
+- It refers to the change itself rather than the code's steady state — past edits, the diff, or PR feedback ("now we also do Y", "we need this because we're changing X", "as discussed, switched to Z"). A comment is read in the future, when that change is simply how things have always been; it must justify the code going forward, not narrate how it got here.
 
 Be suspicious of needlessly long comments. A four-plus line comment needs a really good reason to exist — it should be giving genuinely valuable context (a non-obvious rationale, a subtle invariant, a worked example, a doc/spec reference). If a long comment is just verbose restatement, padding, or could be said in a line, flag it to be tightened.
 
