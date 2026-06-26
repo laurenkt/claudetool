@@ -9,6 +9,7 @@ func init() {
 		tier:       MediumBalanced, // sonnet by default; override with -tier
 		precheck:   containsGoComment,
 		rubric:     valuableCommentsRubric,
+		summary:    "Async comment review found low-value comments:",
 	}.handler())
 }
 
@@ -29,7 +30,9 @@ func containsGoComment(text string) bool {
 	return false
 }
 
-const valuableCommentsRubric = `A comment ADDS VALUE when it tells the reader something the code cannot:
+const valuableCommentsRubric = `You are reviewing the comments in a Go change. Judge only the comments — not the code's correctness, style, or naming.
+
+A comment ADDS VALUE when it tells the reader something the code cannot:
 
 - It explains WHY, not WHAT or HOW — the rationale, trade-off, or a non-obvious choice. ("Retry 3x: upstream 503s for ~1s after a deploy" — not "retry three times".)
 - It records a constraint or invariant not enforceable in code: an ordering requirement, a subtle precondition, a known gotcha, or why an obvious-looking simplification is wrong.

@@ -35,6 +35,7 @@ ones like `dump -o <path>` keep working. Handler names cannot begin with `-`.
 |---|---|---|---|
 | `no-cd` | PreToolUse | `Bash` | Blocks `cd` commands |
 | `use-linear-mcp` | PreToolUse | `Bash\|WebFetch` | Blocks gh/curl/wget/`linear-cli` calls and WebFetch to `linear.app`, points to MCP |
+| `no-shared-pr-body` | PreToolUse | `Bash` | Blocks commands touching the fixed `/tmp/pr-body.md` path — concurrent agents clobber each other's PR body; points to `mktemp` / `--body-file -` |
 | `semgrep-check` | PostToolUse | `Write\|Edit` | Runs semgrep, blocks on findings |
 | `go-augment-style` | PostToolUse | `Write\|Edit` | Blocks verbose `terrors.Augment` context strings (e.g. "failed to read" → "read") |
 | `redirect-writes` | PreToolUse | `Write\|Edit` | Rewrites file paths (set `REDIRECT_FROM` and `REDIRECT_TO` env vars) |
@@ -42,7 +43,11 @@ ones like `dump -o <path>` keep working. Handler names cannot begin with `-`.
 | `go-fix` | PostToolUse | `Write\|Edit` | Runs `go fix` on the package containing the edited `.go` file; applies modernizations and reports the diff back to Claude |
 | `go-makeslice` | PostToolUse | `Write\|Edit` | Advisory (non-blocking): suggests `var x []T` instead of `make([]T, 0, n)` |
 | `go-named-func` | PostToolUse | `Write\|Edit` | Advisory (non-blocking): flags named anonymous functions (`name := func(...) {...}`); skips `_test.go` |
+| `go-cmp-or` | PostToolUse | `Write\|Edit` | Advisory (non-blocking): flags hand-rolled first-non-empty-string selectors (a value returned under an `x != ""` guard with a `return ""` fallback); points at `cmp.Or` |
 | `valuable-comments` | PostToolUse | `Write\|Edit` | **Async** ([see below](#async-review-hooks)): dispatches the changed `.go` code to a headless `claude` reviewer in the background; wakes the agent only when a comment restates the code, the name, or something that belongs in a validator |
+| `change-detector-tests` | PostToolUse | `Write\|Edit` | **Async** ([see below](#async-review-hooks)): reviews changed `_test.go` files and pushes back on change-detector tests (coupled to the implementation, not behaviour); leaves legitimate ones alone (codegen golden files, parsing/round-trip, characterization, security tripwires) |
+| `rpc-wrapper` | PostToolUse | `Write\|Edit` | **Async** ([see below](#async-review-hooks)): flags functions that are pointless thin wrappers around a single generated-client RPC call (`Request{…}.Send(ctx).DecodeResponse()` + trivial error-wrap + return a field); leaves wrappers that transform, orchestrate, or back an interface alone; skips `_test.go` |
+| `ci-watch` | PostToolUse | `Bash` | **Async** ([see below](#ci-watch)): after a `git push` / `gh pr create` / `gh pr ready`, watches the PR's CI checks in the background for up to 30 min and wakes the agent only if a check fails |
 
 ### Example settings.json
 
@@ -75,10 +80,24 @@ agent with the hook's stderr as a system reminder. So the handler returns:
 - **findings** → exit 2 with feedback → the agent is woken (a few seconds later)
   and can go back and revise.
 
-`valuable-comments` is the first such check. It judges whether comments in the
-changed code add value (explain *why*, cite scheme/schema docs or examples,
-clarify what names and validators can't) versus restate the implementation, the
-name, or a rule that belongs in a proto/go validator.
+Two such checks ship today:
+
+- `valuable-comments` judges whether comments in the changed code add value
+  (explain *why*, cite scheme/schema docs or examples, clarify what names and
+  validators can't) versus restate the implementation, the name, or a rule that
+  belongs in a proto/go validator.
+- `change-detector-tests` reviews changed `_test.go` files and pushes back on
+  change-detector tests — ones coupled to the implementation rather than
+  observable behaviour, which break on any refactor and catch no real bug. It
+  deliberately leaves the legitimate cases alone (codegen golden files,
+  message/wire-format round-trips, characterization tests, security/config
+  tripwires).
+- `rpc-wrapper` flags functions that are pointless thin wrappers around a
+  single generated-client RPC call — build one request, `Send().DecodeResponse()`,
+  trivial error-wrap, return a field — where inlining the call at the caller
+  would lose nothing. It leaves wrappers that transform inputs/outputs,
+  orchestrate multiple calls, add retry/caching, or implement an interface
+  method alone.
 
 Because `asyncRewake` is configured **per hook**, an async handler must be its
 own hook entry, not appended to a synchronous chain:
@@ -89,7 +108,9 @@ own hook entry, not appended to a synchronous chain:
     "PostToolUse": [
       {"matcher": "Write|Edit", "hooks": [
         {"type": "command", "command": "claudetool hook go-augment-style backend101 go-fix"},
-        {"type": "command", "command": "claudetool hook valuable-comments", "asyncRewake": true}
+        {"type": "command", "command": "claudetool hook valuable-comments", "asyncRewake": true},
+        {"type": "command", "command": "claudetool hook change-detector-tests", "asyncRewake": true},
+        {"type": "command", "command": "claudetool hook rpc-wrapper", "asyncRewake": true}
       ]}
     ]
   }
@@ -104,6 +125,41 @@ New async checks are a few lines: configure an `asyncReview` (file suffix,
 default tier, a cheap `precheck` gate, and a `rubric`) and register its
 `handler()`. See `internal/hook/handler_asyncreview.go` and
 `internal/hook/handler_valuable_comments.go`.
+
+### ci-watch
+
+`ci-watch` reuses the same `asyncRewake` delivery as the review hooks, but
+instead of dispatching a reviewer it watches the PR's CI. When the agent runs a
+`git push`, `gh pr create`, or `gh pr ready`, the hook looks up the PR for the
+current branch (`gh pr view`) and blocks on `gh pr checks --watch --fail-fast`
+in the background. CI at Monzo takes 8–30+ minutes, so without this the agent
+moves on and the human finds the red build later; here the hook wakes the agent
+(exit 2) on the **first** failing check while the context is still fresh.
+
+- **Failure-only**: silent on success — only a failed check wakes the agent.
+- **No PR yet**: a bare push before `gh pr create` finds no PR and does nothing.
+- **Timeout**: gives up silently after 30 min — it never reports a false failure.
+- **Preemption**: a new push for the same branch kills the previous watcher (via
+  a pidfile under `~/.claude/ci-watch/`), so only the latest push is watched.
+
+Because `asyncRewake` is per hook, `ci-watch` is its own `Bash` entry with a
+timeout matching its 30-min watch window (not chained onto a synchronous hook):
+
+```json
+{
+  "hooks": {
+    "PostToolUse": [
+      {"matcher": "Bash", "hooks": [
+        {"type": "command", "command": "claudetool hook ci-watch", "asyncRewake": true, "timeout": 1800}
+      ]}
+    ]
+  }
+}
+```
+
+Requires `gh` on `PATH` and authenticated. A PR opened via the GitHub web UI
+(rather than `gh`) after a bare push is not detected, and branch CI without a PR
+is not watched — both by design.
 
 ### Adding a hook
 

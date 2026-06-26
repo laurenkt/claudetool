@@ -74,6 +74,7 @@ type asyncReview struct {
 	tier       ReviewTier             // default model tier
 	precheck   func(text string) bool // cheap gate: only dispatch when true (nil = always)
 	rubric     string                 // review criteria embedded in the reviewer prompt
+	summary    string                 // header line prepended to REVISE feedback
 
 	// review runs the reviewer and returns its raw output. Injected in tests;
 	// nil falls back to runClaudeReview against the real `claude` binary.
@@ -122,7 +123,7 @@ func (a asyncReview) handler() Handler {
 
 		// exit 2 with the feedback on stderr; under asyncRewake this is what
 		// surfaces back to the working agent.
-		return nil, fmt.Errorf("%s", feedback)
+		return nil, fmt.Errorf("%s\n\n%s", a.summary, feedback)
 	}
 }
 
@@ -164,29 +165,29 @@ func parseVerdict(out string) (verdict, feedback string) {
 	case "REVISE":
 		body := strings.TrimSpace(strings.Join(lines[i+1:], "\n"))
 		if body == "" {
-			body = "The reviewer flagged a comment but gave no detail."
+			body = "The reviewer flagged an issue but gave no detail."
 		}
-		return "REVISE", "Async comment review found low-value comments:\n\n" + body
+		return "REVISE", body
 	default:
 		return "PASS", ""
 	}
 }
 
-// reviewerSystemPrompt frames the headless reviewer.
-const reviewerSystemPrompt = `You are a code-comment reviewer. You are given a rubric and a snippet of newly written or edited code. Judge ONLY the comments in the snippet against the rubric — not the code's correctness, style, or naming. Follow the output protocol exactly: no preamble, no markdown fences, nothing else.`
+// Subject-agnostic so each check can scope it through its own rubric.
+const reviewerSystemPrompt = `You are a code reviewer. You are given a rubric and a snippet of newly written or edited code. Judge the snippet ONLY against the rubric — ignore anything the rubric does not ask about. Follow the output protocol exactly: no preamble, no markdown fences, nothing else.`
 
 // buildReviewPrompt assembles the prompt piped to `claude -p` on stdin.
 func buildReviewPrompt(rubric, filePath, text string) string {
 	return fmt.Sprintf(`%s
 
 OUTPUT PROTOCOL
-If every comment in the changed code adds value (or there are no comments), respond with exactly:
+If the changed code below is fine by the rubric above, respond with exactly:
 PASS
 
 Otherwise respond with:
 REVISE
-- "<the weak comment>" — <why it adds no value> -> <delete | rewrite as why | move to a validator>
-(one bullet per weak comment, nothing after the list)
+- <one short bullet per issue: what is wrong -> what to do>
+(nothing after the list)
 
 FILE: %s
 --- BEGIN CHANGED CODE ---

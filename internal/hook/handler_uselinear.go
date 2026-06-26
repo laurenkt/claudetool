@@ -21,7 +21,7 @@ var linearCLIRe = regexp.MustCompile(`(^|[^\w-])linear-cli([^\w-]|$)`)
 
 // handleUseLinearMCP blocks attempts to reach Linear outside the MCP server:
 // - Bash invocations of gh/curl/wget/linear-cli targeting Linear
-// - WebFetch on linear.app URLs
+// - WebFetch on linear.app URLs, except the public docs (linear.app/docs/...)
 // Use as a PreToolUse hook with matcher "Bash|WebFetch".
 func handleUseLinearMCP(in *Input) (*Output, error) {
 	switch in.ToolName {
@@ -38,7 +38,8 @@ func handleUseLinearMCP(in *Input) (*Output, error) {
 		if err := json.Unmarshal(in.ToolInput, &wf); err != nil {
 			return nil, nil
 		}
-		if strings.Contains(strings.ToLower(wf.URL), "linear.app") {
+		lower := strings.ToLower(wf.URL)
+		if strings.Contains(lower, "linear.app") && !strings.Contains(lower, "linear.app/docs") {
 			return nil, fmt.Errorf("%s", linearMCPMessage)
 		}
 	}

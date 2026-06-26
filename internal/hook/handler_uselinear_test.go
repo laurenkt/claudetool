@@ -92,6 +92,19 @@ func TestUseLinearMCPAllows(t *testing.T) {
 		}
 	})
 
+	for _, url := range []string{
+		"https://linear.app/docs/mcp",
+		"https://linear.app/docs",
+		"https://LINEAR.app/DOCS/api",
+	} {
+		t.Run("linear docs allowed: "+url, func(t *testing.T) {
+			input := makeToolInput("PreToolUse", "WebFetch", WebFetchInput{URL: url, Prompt: "summarise"})
+			if code, stderr := runHandler(t, "use-linear-mcp", input); code != 0 {
+				t.Errorf("exit code = %d, want 0 (docs should be readable); stderr=%q", code, stderr)
+			}
+		})
+	}
+
 	t.Run("write tool ignored", func(t *testing.T) {
 		input := makeToolInput("PreToolUse", "Write", WriteInput{FilePath: "/tmp/x.txt", Content: "linear-cli stuff https://linear.app"})
 		if code, stderr := runHandler(t, "use-linear-mcp", input); code != 0 {
