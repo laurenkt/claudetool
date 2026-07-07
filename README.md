@@ -48,6 +48,42 @@ ones like `dump -o <path>` keep working. Handler names cannot begin with `-`.
 | `change-detector-tests` | PostToolUse | `Write\|Edit` | **Async** ([see below](#async-review-hooks)): reviews changed `_test.go` files and pushes back on change-detector tests (coupled to the implementation, not behaviour); leaves legitimate ones alone (codegen golden files, parsing/round-trip, characterization, security tripwires) |
 | `rpc-wrapper` | PostToolUse | `Write\|Edit` | **Async** ([see below](#async-review-hooks)): flags functions that are pointless thin wrappers around a single generated-client RPC call (`Request{…}.Send(ctx).DecodeResponse()` + trivial error-wrap + return a field); leaves wrappers that transform, orchestrate, or back an interface alone; skips `_test.go` |
 | `ci-watch` | PostToolUse | `Bash` | **Async** ([see below](#ci-watch)): after a `git push` / `gh pr create` / `gh pr ready`, watches the PR's CI checks in the background for up to 30 min and wakes the agent only if a check fails |
+| `auto-approve-readonly` | PreToolUse | `Bash` | Auto-approves a command when *every* segment is read-only (cd/ls/cat/grep/find/jq, git read subcommands, `gh` read subcommands + GET-only `gh api`, `bq` metadata `show`/`ls`/`head`, read-only data-shell verbs). Quote-aware, so pipes inside a `jq`/`awk` program don't fool it. See [below](#permission-prompt-reduction) |
+| `strip-redundant-cd` | PreToolUse | `Bash` | Rewrites the command to drop a leading `cd <dir>` when `<dir>` already equals the working directory (a no-op that otherwise trips the "changes directory before running git / cd + output redirection" gate) |
+| `no-shell-loops` | PreToolUse | `Bash` | Blocks `for`/`while`/`until` loops; points at running each iteration as its own command or using the Read/Grep tools |
+| `no-inline-python` | PreToolUse | `Bash` | Blocks inline `python[23] -c '…'`; points at `jq` for JSON and the Read/Grep tools for files |
+| `no-inline-file` | PreToolUse | `Bash` | Blocks heredocs and content-building command substitution `$(cat/printf/echo …)`; points at writing the content with a file tool and referencing it (`< file`, `git commit -F`, `gh pr create --body-file`) |
+| `no-exit-code-check` | PreToolUse | `Bash` | Blocks `$?` exit-code scaffolding (e.g. `echo "EXIT=$?"`); points at running the command and reading its output |
+
+### Permission-prompt reduction
+
+`auto-approve-readonly` plus the `no-*`/`strip-*` handlers above form a chain that
+cuts Claude Code's manual-approval prompts down to the ones actually worth a look.
+The idea: an interactive agent generates a lot of *unanalyzable* shell — `cd`
+prefixes, `for` loops, inline `python -c`, heredocs, `$(cat …)`/`$(printf …)`,
+`$?` checks — and each defeats the permission allowlist even when the underlying
+tool is trusted. So:
+
+- **Reads are auto-approved.** `auto-approve-readonly` returns an `allow` decision
+  when the whole command is read-only, so harmless exploration never prompts. It
+  can only ever turn a prompt into an approval, never block, and never approves a
+  write, a redirect to a real file, command substitution, or an unknown command.
+- **Unanalyzable anti-patterns are blocked with a fix.** The `no-*` handlers refuse
+  the roundabout form and name the analyzable rewrite — which matches the allowlist
+  and runs without a prompt.
+- **A redundant `cd` is rewritten away** by `strip-redundant-cd` (a no-op `cd` only).
+
+Chain them in one entry (order matters — put `strip-redundant-cd` first):
+
+```json
+{
+  "hooks": {
+    "PreToolUse": [
+      {"matcher": "Bash", "hooks": [{"type": "command", "command": "claudetool hook strip-redundant-cd auto-approve-readonly no-shell-loops no-inline-python no-inline-file no-exit-code-check"}]}
+    ]
+  }
+}
+```
 
 ### Example settings.json
 
