@@ -276,8 +276,16 @@ func commandWord(seg string) (string, []string) {
 // operators) is a read-only operation.
 func segmentIsReadOnly(seg string) bool {
 	cmd, args := commandWord(seg)
-	// Reject empty words and redirection tokens masquerading as the command.
-	if cmd == "" || strings.ContainsAny(cmd, "<>&") {
+	if cmd == "" {
+		// A standalone variable assignment (NAME=value with no command) is
+		// inert, so read-only commands that use the variable still approve.
+		// A variable in command position (`$CMD ...`) or as a subcommand is
+		// not a known read-only command, so it still fails — a mutating
+		// command hidden behind a variable is never approved.
+		return isStandaloneAssignment(seg)
+	}
+	// Reject redirection tokens masquerading as the command word.
+	if strings.ContainsAny(cmd, "<>&") {
 		return false
 	}
 
@@ -288,12 +296,18 @@ func segmentIsReadOnly(seg string) bool {
 		return !hasAnyFlag(args, "-o", "--output")
 	case "base64":
 		return !hasAnyFlag(args, "-o", "--output")
+	case "sed":
+		return sedIsReadOnly(args)
+	case "awk", "gawk", "mawk":
+		return awkIsReadOnly(args)
 	case "git":
 		return gitIsReadOnly(args)
 	case "gh":
 		return ghIsReadOnly(args)
 	case "bq":
 		return bqIsReadOnly(args)
+	case "docker":
+		return dockerIsReadOnly(args)
 	case "execute-in-data-shell":
 		return dataShellIsReadOnly(args)
 	case "adbt", "model-routing", "run-data-standards", "modelgen":
@@ -302,6 +316,54 @@ func segmentIsReadOnly(seg string) bool {
 	default:
 		return readOnlyCmds[cmd]
 	}
+}
+
+// sedIsReadOnly rejects sed invocations that edit files in place. The `w`
+// write command inside a script is rare and not covered here; `-i` is the
+// dominant write vector.
+func sedIsReadOnly(args []string) bool {
+	for _, a := range args {
+		a = unquote(a)
+		if a == "--in-place" || strings.HasPrefix(a, "--in-place=") || strings.HasPrefix(a, "-i") {
+			return false
+		}
+	}
+	return true
+}
+
+// awkUnsafe are substrings that indicate an awk program can write, pipe, or
+// execute: output redirection (> >>), input redirection / getline (<), pipes
+// to a command (|), command substitution (backtick), system(), and getline.
+var awkUnsafe = []string{">", "<", "|", "`", "system", "getline"}
+
+// awkIsReadOnly reports whether an awk invocation only reads. It rejects an
+// external program file (-f, uninspectable) and any invocation whose text
+// contains a write/pipe/exec construct. The check is over the whole joined
+// argument text (not a single token) because the program is quoted and
+// whitespace-splitting scatters it across tokens. Comparison operators (>, <)
+// also trip this, so such programs conservatively fall through to a prompt.
+func awkIsReadOnly(args []string) bool {
+	if hasAnyFlag(args, "-f") {
+		return false
+	}
+	joined := strings.Join(args, " ")
+	for _, u := range awkUnsafe {
+		if strings.Contains(joined, u) {
+			return false
+		}
+	}
+	// Require an inline program (some non-flag argument).
+	for i := 0; i < len(args); i++ {
+		a := unquote(args[i])
+		if strings.HasPrefix(a, "-") {
+			if (a == "-F" || a == "-v") && i+1 < len(args) {
+				i++
+			}
+			continue
+		}
+		return true
+	}
+	return false
 }
 
 // findIsReadOnly rejects find invocations that can execute or write:
@@ -337,6 +399,49 @@ func bqIsReadOnly(args []string) bool {
 			continue
 		}
 		return bqReadSubcmds[a]
+	}
+	return false
+}
+
+// dockerReadCmds are docker subcommands that only read container/image state.
+var dockerReadCmds = map[string]bool{
+	"ps": true, "images": true, "inspect": true, "logs": true, "stats": true,
+	"top": true, "port": true, "diff": true, "history": true, "events": true,
+	"version": true, "info": true,
+}
+
+// dockerMgmtCmds are docker management commands with a read/write split;
+// they read only when their subcommand is a dockerReadVerb.
+var dockerMgmtCmds = map[string]bool{
+	"system": true, "image": true, "container": true, "volume": true,
+	"network": true, "context": true, "builder": true, "node": true,
+	"service": true, "config": true, "secret": true,
+}
+
+var dockerReadVerbs = map[string]bool{
+	"ls": true, "inspect": true, "df": true, "info": true, "show": true, "list": true,
+}
+
+// dockerIsReadOnly reports whether a docker invocation only reads. run/exec/rm/
+// kill/stop/start/build/pull/push/prune/cp and the like are not auto-approved.
+func dockerIsReadOnly(args []string) bool {
+	i := 0
+	for i < len(args) && strings.HasPrefix(unquote(args[i]), "-") {
+		i++
+	}
+	if i >= len(args) {
+		return false
+	}
+	sub := unquote(args[i])
+	if dockerReadCmds[sub] {
+		return true
+	}
+	if dockerMgmtCmds[sub] {
+		j := i + 1
+		for j < len(args) && strings.HasPrefix(unquote(args[j]), "-") {
+			j++
+		}
+		return j < len(args) && dockerReadVerbs[unquote(args[j])]
 	}
 	return false
 }
@@ -414,6 +519,21 @@ func redirectsAreSafe(command string) bool {
 			return false
 		}
 		i = j
+	}
+	return true
+}
+
+// isStandaloneAssignment reports whether a segment is purely one or more
+// VAR=value assignments with no command following (e.g. `BR=origin/main`).
+func isStandaloneAssignment(seg string) bool {
+	fields := strings.Fields(strings.TrimSpace(seg))
+	if len(fields) == 0 {
+		return false
+	}
+	for _, f := range fields {
+		if !isEnvAssignment(f) {
+			return false
+		}
 	}
 	return true
 }

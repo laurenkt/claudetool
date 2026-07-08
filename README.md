@@ -6,6 +6,21 @@ A companion binary for Claude Code. Provides a status line and hook handlers.
 go install github.com/laurenkt/claudetool@latest
 ```
 
+## Setup
+
+`go install` is all you need — no clone. It drops a `claudetool` binary in your
+`GOBIN` (usually `~/go/bin`).
+
+1. **Put `~/go/bin` on your `PATH`** (`go env GOPATH`/bin) so `claudetool` is found.
+2. **Wire the hooks into `~/.claude/settings.json`** — merge the entries below
+   into your existing config (don't overwrite it). If Claude Code can't find
+   `claudetool` (hooks don't always inherit your shell `PATH`), use the absolute
+   path, e.g. `/Users/you/go/bin/claudetool hook …`.
+
+For the permission-prompt-reduction chain, see
+[below](#permission-prompt-reduction). Hooks take effect immediately, including
+in a running session.
+
 ## Status line
 
 Reads Claude Code JSON from stdin and outputs a formatted terminal status line (directory, branch, model, cost, context usage).
@@ -48,11 +63,12 @@ ones like `dump -o <path>` keep working. Handler names cannot begin with `-`.
 | `change-detector-tests` | PostToolUse | `Write\|Edit` | **Async** ([see below](#async-review-hooks)): reviews changed `_test.go` files and pushes back on change-detector tests (coupled to the implementation, not behaviour); leaves legitimate ones alone (codegen golden files, parsing/round-trip, characterization, security tripwires) |
 | `rpc-wrapper` | PostToolUse | `Write\|Edit` | **Async** ([see below](#async-review-hooks)): flags functions that are pointless thin wrappers around a single generated-client RPC call (`Request{…}.Send(ctx).DecodeResponse()` + trivial error-wrap + return a field); leaves wrappers that transform, orchestrate, or back an interface alone; skips `_test.go` |
 | `ci-watch` | PostToolUse | `Bash` | **Async** ([see below](#ci-watch)): after a `git push` / `gh pr create` / `gh pr ready`, watches the PR's CI checks in the background for up to 30 min and wakes the agent only if a check fails |
-| `auto-approve-readonly` | PreToolUse | `Bash` | Auto-approves a command when *every* segment is read-only (cd/ls/cat/grep/find/jq, git read subcommands, `gh` read subcommands + GET-only `gh api`, `bq` metadata `show`/`ls`/`head`, read-only data-shell verbs). Quote-aware, so pipes inside a `jq`/`awk` program don't fool it. See [below](#permission-prompt-reduction) |
+| `auto-approve-readonly` | PreToolUse | `Bash` | Auto-approves a command when *every* segment is read-only: cd/ls/cat/grep/find/jq, `awk`/`sed` (guarded — no write/exec/`-i`), git read subcommands, `gh` read subcommands + GET-only `gh api`, `bq` metadata `show`/`ls`/`head`, `docker` read subcommands, read-only data-shell verbs. Quote-aware (pipes inside a `jq`/`awk` program don't fool it); a standalone `VAR=value` assignment is treated as inert. See [below](#permission-prompt-reduction) |
 | `strip-redundant-cd` | PreToolUse | `Bash` | Rewrites the command to drop a leading `cd <dir>` when `<dir>` already equals the working directory (a no-op that otherwise trips the "changes directory before running git / cd + output redirection" gate) |
 | `no-shell-loops` | PreToolUse | `Bash` | Blocks `for`/`while`/`until` loops; points at running each iteration as its own command or using the Read/Grep tools |
 | `no-inline-python` | PreToolUse | `Bash` | Blocks inline `python[23] -c '…'`; points at `jq` for JSON and the Read/Grep tools for files |
 | `no-inline-file` | PreToolUse | `Bash` | Blocks heredocs and content-building command substitution `$(cat/printf/echo …)`; points at writing the content with a file tool and referencing it (`< file`, `git commit -F`, `gh pr create --body-file`) |
+| `no-command-substitution` | PreToolUse | `Bash` | Blocks command substitution `$(…)`/backticks (arithmetic `$((…))` allowed); points at running the inner command as its own step and using its output explicitly (e.g. `docker ps -q …` then `docker inspect <ids>`) |
 | `no-exit-code-check` | PreToolUse | `Bash` | Blocks `$?` exit-code scaffolding (e.g. `echo "EXIT=$?"`); points at running the command and reading its output |
 
 ### Permission-prompt reduction
@@ -79,7 +95,7 @@ Chain them in one entry (order matters — put `strip-redundant-cd` first):
 {
   "hooks": {
     "PreToolUse": [
-      {"matcher": "Bash", "hooks": [{"type": "command", "command": "claudetool hook strip-redundant-cd auto-approve-readonly no-shell-loops no-inline-python no-inline-file no-exit-code-check"}]}
+      {"matcher": "Bash", "hooks": [{"type": "command", "command": "claudetool hook strip-redundant-cd auto-approve-readonly no-shell-loops no-inline-python no-inline-file no-command-substitution no-exit-code-check"}]}
     ]
   }
 }

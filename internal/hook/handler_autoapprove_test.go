@@ -64,6 +64,23 @@ func TestAutoApproveAllows(t *testing.T) {
 		"adbt upstream some_model",
 		"run-data-standards static",
 		"modelgen version",
+		// docker read subcommands (the two-step rewrite of the $(…) case).
+		`docker ps --filter "label=is-dbt-monzo-shell=true" --format '{{.Names}} {{.Status}}' 2>/dev/null | head`,
+		"docker inspect --format '{{.Name}} {{.State.Status}}' abc123 def456 | grep pdg-3722",
+		"docker system df",
+		"docker image ls",
+		// Standalone ref/path variable + read-only uses — the screenshot case.
+		`BR=origin/pdg-3530-x
+echo "===views==="
+git ls-tree -r --name-only $BR | grep -i "connection_status\|_stats"
+git show $BR:views/x.view.lkml 2>/dev/null | grep -n "sql_table_name"
+git cat-file -e $BR:views/y.view.lkml 2>/dev/null && echo "EXISTS" || echo "GONE"`,
+		// awk/sed read-only text munging — the screenshot case.
+		`grep -E "^\s+(dimension|measure):" foo.view.lkml | awk '{print $2}' | sed 's/:$//' | sort | uniq -d`,
+		"awk -F: '{print $1}' file",
+		"awk '{print $NF}' file",
+		"sed -n '1,10p' file",
+		"sed 's/foo/bar/g' file",
 	}
 	for _, c := range cmds {
 		t.Run(c, func(t *testing.T) {
@@ -99,6 +116,22 @@ func TestAutoApproveStaysSilent(t *testing.T) {
 		"bq rm -t monzo-analytics:episodes.foo",
 		"bq mk --table monzo-analytics:episodes.bar",
 		"bq load ds.table gs://x.csv",
+		// docker mutating/lifecycle subcommands must still prompt.
+		"docker kill abc123",
+		"docker rm -f abc123",
+		"docker system prune -f",
+		"docker exec abc123 bash",
+		"docker run --rm alpine",
+		// A variable must not smuggle a mutating command past the check.
+		"X=push && git $X origin main",
+		"BR=main && git push origin $BR",
+		// awk/sed write & exec vectors must still prompt.
+		"sed -i 's/a/b/' file",
+		"sed -i.bak 's/a/b/' file",
+		`awk '{print $1 > "out.txt"}' file`,
+		`awk 'BEGIN{system("rm -rf x")}'`,
+		`awk '{print | "sh"}' file`,
+		"awk -f script.awk file",
 		// git write forms must still prompt even with the richer git handler.
 		"git branch newfeature",
 		"git branch -D oldbranch",
