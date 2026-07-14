@@ -49,10 +49,11 @@ ones like `dump -o <path>` keep working. Handler names cannot begin with `-`.
 | Handler | Event | Matcher | What it does |
 |---|---|---|---|
 | `no-cd` | PreToolUse | `Bash` | Blocks `cd` commands |
+| `no-diff-master` | PreToolUse | `Bash` | Blocks `git diff master...HEAD`/`origin/main...HEAD`-style commands — the diff is enormous in a large monorepo; points at `git log master..HEAD` or diffing specific files |
 | `use-linear-mcp` | PreToolUse | `Bash\|WebFetch` | Blocks gh/curl/wget/`linear-cli` calls and WebFetch to `linear.app`, points to MCP |
 | `no-shared-pr-body` | PreToolUse | `Bash` | Blocks commands touching the fixed `/tmp/pr-body.md` path — concurrent agents clobber each other's PR body; points to `mktemp` / `--body-file -` |
 | `no-prod` | PreToolUse | `Bash` | Blocks `£ -e prod`/`--environment production` invocations of the Monzo CLI against prod; tells the agent to have the human operator run it and paste results back. Lower envs (`£ -e s101 ...`) are allowed |
-| `semgrep-check` | PostToolUse | `Write\|Edit` | Runs semgrep, blocks on findings |
+| `go-swallowed-error` | PostToolUse | `Write\|Edit` | Runs a semgrep rule flagging `if err != nil { log.X(...) }` where the error is logged but not returned/propagated; blocks on findings |
 | `go-augment-style` | PostToolUse | `Write\|Edit` | Blocks verbose `terrors.Augment` context strings (e.g. "failed to read" → "read") |
 | `redirect-writes` | PreToolUse | `Write\|Edit` | Rewrites file paths (set `REDIRECT_FROM` and `REDIRECT_TO` env vars) |
 | `backend101` | PreToolUse | `Write\|Edit` | Enforces Backend 101 naming: firehose consumers in `consumer/consumer.go`, streams consumers in `streamsconsumer/consumer.go`, handler functions in matching snake_case files |
