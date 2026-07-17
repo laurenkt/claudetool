@@ -68,17 +68,31 @@ func tierFromArgs(args []string, def ReviewTier) ReviewTier {
 // the background without blocking the working agent, and only wakes it (via
 // exit 2 + stderr) when the reviewer returns findings.
 type asyncReview struct {
-	name       string                 // handler name, e.g. "valuable-comments"
-	fileSuffix string                 // required file suffix, e.g. ".go"
-	skipSuffix string                 // optional suffix to skip, e.g. "_test.go" ("" = none)
-	tier       ReviewTier             // default model tier
-	precheck   func(text string) bool // cheap gate: only dispatch when true (nil = always)
-	rubric     string                 // review criteria embedded in the reviewer prompt
-	summary    string                 // header line prepended to REVISE feedback
+	name         string                 // handler name, e.g. "valuable-comments"
+	fileSuffixes []string               // required suffixes, any match (nil = every file)
+	skipSuffix   string                 // optional suffix to skip, e.g. "_test.go" ("" = none)
+	tier         ReviewTier             // default model tier
+	precheck     func(text string) bool // cheap gate: only dispatch when true (nil = always)
+	rubric       string                 // review criteria embedded in the reviewer prompt
+	summary      string                 // header line prepended to REVISE feedback
 
 	// review runs the reviewer and returns its raw output. Injected in tests;
 	// nil falls back to runClaudeReview against the real `claude` binary.
 	review func(prompt, model string) (string, error)
+}
+
+// matchesSuffix reports whether filePath carries one of the handler's required
+// suffixes. With no suffixes configured, every file matches.
+func (a asyncReview) matchesSuffix(filePath string) bool {
+	if len(a.fileSuffixes) == 0 {
+		return true
+	}
+	for _, s := range a.fileSuffixes {
+		if strings.HasSuffix(filePath, s) {
+			return true
+		}
+	}
+	return false
 }
 
 // handler returns a Handler closure for use with Register.
@@ -92,7 +106,7 @@ func (a asyncReview) handler() Handler {
 		if filePath == "" {
 			return nil, nil
 		}
-		if a.fileSuffix != "" && !strings.HasSuffix(filePath, a.fileSuffix) {
+		if !a.matchesSuffix(filePath) {
 			return nil, nil
 		}
 		if a.skipSuffix != "" && strings.HasSuffix(filePath, a.skipSuffix) {
