@@ -20,11 +20,11 @@ func newReview(t *testing.T, verdict string) (asyncReview, *struct {
 		model  string
 	}{}
 	a := asyncReview{
-		name:       "valuable-comments",
-		fileSuffix: ".go",
-		tier:       MediumBalanced,
-		precheck:   containsGoComment,
-		rubric:     valuableCommentsRubric,
+		name:         "valuable-comments",
+		fileSuffixes: []string{".go"},
+		tier:         MediumBalanced,
+		precheck:     containsLineComment,
+		rubric:       valuableCommentsRubric,
 		review: func(prompt, model string) (string, error) {
 			rec.called = true
 			rec.prompt = prompt

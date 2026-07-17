@@ -4,20 +4,19 @@ import "strings"
 
 func init() {
 	Register("valuable-comments", asyncReview{
-		name:       "valuable-comments",
-		fileSuffix: ".go",
-		tier:       MediumBalanced, // sonnet by default; override with -tier
-		precheck:   containsGoComment,
-		rubric:     valuableCommentsRubric,
-		summary:    "Async comment review found low-value comments:",
+		name:         "valuable-comments",
+		fileSuffixes: []string{".go"},
+		tier:         MediumBalanced, // sonnet by default; override with -tier
+		precheck:     containsLineComment,
+		rubric:       valuableCommentsRubric,
+		summary:      "Async comment review found low-value comments:",
 	}.handler())
 }
 
-// containsGoComment reports whether text plausibly introduces a Go comment.
-// Deliberately cheap and slightly over-eager: a borderline hit (a `//` inside a
-// string, say) just costs one reviewer call that answers PASS, whereas a miss
-// would skip review entirely — so we bias toward letting things through.
-func containsGoComment(text string) bool {
+// containsLineComment reports whether text plausibly introduces a `//` or `/*`
+// comment. Intentionally over-eager: a false positive costs one PASS review, a
+// miss skips review entirely.
+func containsLineComment(text string) bool {
 	for _, line := range strings.Split(text, "\n") {
 		trimmed := strings.TrimSpace(line)
 		if strings.HasPrefix(trimmed, "//") || strings.HasPrefix(trimmed, "/*") {
