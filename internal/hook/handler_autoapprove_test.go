@@ -81,6 +81,12 @@ git cat-file -e $BR:views/y.view.lkml 2>/dev/null && echo "EXISTS" || echo "GONE
 		"awk '{print $NF}' file",
 		"sed -n '1,10p' file",
 		"sed 's/foo/bar/g' file",
+		// xargs wrapping a read-only command — the screenshot case.
+		`cd /Users/x/analytics && find dbt -path '*macros*' -name '*.sql' | xargs grep -l "extract_data_for_incremental_run" 2>/dev/null | grep -v _stubs | head`,
+		"git ls-files | xargs grep -n foo",
+		"find . -name '*.sql' -print0 | xargs -0 grep -l bar",
+		"ls | xargs -I {} cat {}",
+		"find . -name '*.py' | xargs -n 1 -P 4 wc -l",
 	}
 	for _, c := range cmds {
 		t.Run(c, func(t *testing.T) {
@@ -154,6 +160,11 @@ func TestAutoApproveStaysSilent(t *testing.T) {
 		// git write subcommand.
 		"git commit -m x",
 		"git branch -D main",
+		// xargs wrapping a mutating command must still prompt.
+		"find . -name '*.tmp' | xargs rm",
+		"ls | xargs -0 rm -rf",
+		"cat list.txt | xargs -I {} mv {} /tmp/",
+		"echo x | xargs", // bare xargs, no wrapped command
 	}
 	for _, c := range cmds {
 		t.Run(c, func(t *testing.T) {
