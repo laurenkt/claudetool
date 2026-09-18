@@ -120,7 +120,9 @@ type asyncReview struct {
 // handler returns a Handler closure for use with Register.
 func (a asyncReview) handler() Handler {
 	return func(in *Input) (*Output, error) {
-		if in.ToolName != "Write" && in.ToolName != "Edit" {
+		switch in.ToolName {
+		case "Write", "Edit", "MultiEdit":
+		default:
 			return nil, nil
 		}
 
@@ -173,7 +175,7 @@ func (a asyncReview) handler() Handler {
 }
 
 // changedContent extracts the file path and the newly written/edited text from
-// a Write or Edit tool input.
+// a Write, Edit, or MultiEdit tool input.
 func changedContent(in *Input) (filePath, text string) {
 	switch in.ToolName {
 	case "Write":
@@ -188,6 +190,18 @@ func changedContent(in *Input) (filePath, text string) {
 			return "", ""
 		}
 		return e.FilePath, e.NewString
+	case "MultiEdit":
+		var m MultiEditInput
+		if err := json.Unmarshal(in.ToolInput, &m); err != nil {
+			return "", ""
+		}
+		// Join every edit's new text so the reviewer sees all the changes at once.
+		var b strings.Builder
+		for _, e := range m.Edits {
+			b.WriteString(e.NewString)
+			b.WriteString("\n")
+		}
+		return m.FilePath, b.String()
 	}
 	return "", ""
 }

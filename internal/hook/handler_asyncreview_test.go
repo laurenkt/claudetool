@@ -83,6 +83,34 @@ func TestAsyncReviewLogsRevise(t *testing.T) {
 	}
 }
 
+// MultiEdit must be reviewed too: the hook matcher includes it, and the change
+// is the union of every edit's new text.
+func TestAsyncReviewMultiEdit(t *testing.T) {
+	readLog := withAsyncLog(t)
+	var gotPrompt string
+	a := asyncReviewWith(func(prompt, model string) (string, error) {
+		gotPrompt = prompt
+		return "REVISE\n- x", nil
+	})
+
+	_, err := invoke(t, a, "MultiEdit", MultiEditInput{
+		FilePath: "/src/x.go",
+		Edits: []EditInput{
+			{OldString: "a", NewString: "first change"},
+			{OldString: "b", NewString: "second change"},
+		},
+	})
+	if err == nil {
+		t.Fatal("MultiEdit REVISE should wake the agent")
+	}
+	if !strings.Contains(gotPrompt, "first change") || !strings.Contains(gotPrompt, "second change") {
+		t.Errorf("reviewer prompt should include every edit's new text, got %q", gotPrompt)
+	}
+	if log := readLog(); !strings.Contains(log, "\tREVISE\t/src/x.go") {
+		t.Errorf("log should record the MultiEdit review, got %q", log)
+	}
+}
+
 // reviewerEnv must drop the host's child-session/auth-broker markers (which
 // make a spawned claude expect host-brokered auth it can't reach) while keeping
 // everything else, including credential-locating vars.
