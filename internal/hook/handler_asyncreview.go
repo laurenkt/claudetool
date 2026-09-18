@@ -2,10 +2,46 @@ package hook
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
+	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
+	"time"
 )
+
+// asyncLogOverride redirects the diagnostic log when non-empty. Tests set it;
+// production leaves it blank and uses asyncLogPath's default.
+var asyncLogOverride string
+
+// asyncLogPath is the fixed, easily-tailed file async reviewers append to, so a
+// user can watch whether reviews actually run and why they stay silent:
+//
+//	tail -f ~/.claude/claudetool-async.log
+func asyncLogPath() string {
+	if asyncLogOverride != "" {
+		return asyncLogOverride
+	}
+	if home, err := os.UserHomeDir(); err == nil && home != "" {
+		return filepath.Join(home, ".claude", "claudetool-async.log")
+	}
+	return filepath.Join(os.TempDir(), "claudetool-async.log")
+}
+
+// logAsync appends one tab-separated diagnostic line: time, handler, outcome,
+// file. Best-effort — any open/write failure is ignored, since a reviewer's
+// diagnostics must never change hook behaviour. Newlines in outcome (e.g. a
+// multi-line error) are flattened to keep one event per line.
+func logAsync(handler, outcome, filePath string) {
+	f, err := os.OpenFile(asyncLogPath(), os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
+	if err != nil {
+		return
+	}
+	defer f.Close()
+	outcome = strings.ReplaceAll(outcome, "\n", " ")
+	fmt.Fprintf(f, "%s\t%s\t%s\t%s\n", time.Now().Format(time.RFC3339), handler, outcome, filePath)
+}
 
 // ReviewTier selects which model the background reviewer runs on, trading
 // latency and cost against judgement quality.
@@ -84,7 +120,9 @@ type asyncReview struct {
 // handler returns a Handler closure for use with Register.
 func (a asyncReview) handler() Handler {
 	return func(in *Input) (*Output, error) {
-		if in.ToolName != "Write" && in.ToolName != "Edit" {
+		switch in.ToolName {
+		case "Write", "Edit", "MultiEdit":
+		default:
 			return nil, nil
 		}
 
@@ -109,17 +147,26 @@ func (a asyncReview) handler() Handler {
 			review = runClaudeReview
 		}
 
+		logAsync(a.name, "DISPATCH", filePath)
+
 		out, err := review(buildReviewPrompt(a.rubric, filePath, text), tier.model())
 		if err != nil {
-			// Reviewer unavailable (claude not on PATH, timeout, etc.).
-			// Best-effort: never wake the agent on infrastructure failure.
+			// Reviewer unavailable (claude not on PATH, not logged in, timeout,
+			// etc.). We still never wake the agent on an infrastructure failure,
+			// but we record it: a swallowed error here is indistinguishable from
+			// a genuine PASS, so without this line a broken reviewer looks like a
+			// clean bill of health.
+			logAsync(a.name, "ERROR: "+err.Error(), filePath)
 			return nil, nil
 		}
 
 		verdict, feedback := parseVerdict(out)
 		if verdict != "REVISE" {
+			logAsync(a.name, "PASS", filePath)
 			return nil, nil
 		}
+
+		logAsync(a.name, "REVISE", filePath)
 
 		// exit 2 with the feedback on stderr; under asyncRewake this is what
 		// surfaces back to the working agent.
@@ -128,7 +175,7 @@ func (a asyncReview) handler() Handler {
 }
 
 // changedContent extracts the file path and the newly written/edited text from
-// a Write or Edit tool input.
+// a Write, Edit, or MultiEdit tool input.
 func changedContent(in *Input) (filePath, text string) {
 	switch in.ToolName {
 	case "Write":
@@ -143,6 +190,18 @@ func changedContent(in *Input) (filePath, text string) {
 			return "", ""
 		}
 		return e.FilePath, e.NewString
+	case "MultiEdit":
+		var m MultiEditInput
+		if err := json.Unmarshal(in.ToolInput, &m); err != nil {
+			return "", ""
+		}
+		// Join every edit's new text so the reviewer sees all the changes at once.
+		var b strings.Builder
+		for _, e := range m.Edits {
+			b.WriteString(e.NewString)
+			b.WriteString("\n")
+		}
+		return m.FilePath, b.String()
 	}
 	return "", ""
 }
@@ -200,20 +259,69 @@ FILE: %s
 //
 //   - `--settings "{}"` stops the inner claude from inheriting the user's hooks,
 //     which avoids recursion and shaves startup latency.
+//   - `--strict-mcp-config` with no `--mcp-config` loads zero MCP servers,
+//     ignoring the user's project/global/plugin MCP configs. Without it the
+//     reviewer boots every configured MCP server on startup; any one with a
+//     stale token triggers an interactive auth flow that a headless (no-TTY)
+//     claude can't complete, so it exits 1 with no output. That was the
+//     intermittent failure that let unreviewed code through. We do NOT use
+//     `--bare`: it forces auth to ANTHROPIC_API_KEY only, never reading the
+//     OAuth/keychain credentials the reviewer relies on.
 //   - `--disallowed-tools` keeps the reviewer to pure text analysis; it never
 //     needs to touch the filesystem or run commands.
+//   - cmd.Env drops the host's CLAUDE_CODE_* / CLAUDECODE vars — see
+//     reviewerEnv for why.
 func runClaudeReview(prompt, model string) (string, error) {
 	cmd := exec.Command("claude",
 		"-p",
 		"--model", model,
 		"--settings", "{}",
+		"--strict-mcp-config",
 		"--disallowed-tools", "Bash Edit Write Read Glob Grep WebFetch WebSearch",
 		"--append-system-prompt", reviewerSystemPrompt,
 	)
+	cmd.Env = reviewerEnv()
 	cmd.Stdin = strings.NewReader(prompt)
 	out, err := cmd.Output()
 	if err != nil {
+		// "exit status 1" alone can't tell a login failure from a rate limit from
+		// a bad flag. claude may report on either stream — stderr lands in
+		// ExitError.Stderr, but errors like "Not logged in" print to stdout, which
+		// Output returns in out. Surface whichever we got.
+		detail := strings.TrimSpace(string(out))
+		var ee *exec.ExitError
+		if errors.As(err, &ee) && len(ee.Stderr) > 0 {
+			detail = strings.TrimSpace(string(ee.Stderr))
+		}
+		if detail != "" {
+			return "", fmt.Errorf("%w: %s", err, detail)
+		}
 		return "", err
 	}
 	return string(out), nil
+}
+
+// reviewerEnv returns the process environment with the host Claude Code
+// session's markers removed: everything prefixed CLAUDE_CODE_ plus CLAUDECODE.
+//
+// When claudetool runs as a hook, the host exports child-session/auth-broker
+// vars — CLAUDE_CODE_CHILD_SESSION, CLAUDE_CODE_MESSAGING_SOCKET/TOKEN,
+// CLAUDE_CODE_SDK_HAS_{HOST_AUTH,OAUTH}_REFRESH, and CLAUDECODE=1. A freshly
+// spawned `claude -p` that inherits them believes it is a child session that
+// must fetch auth from the host broker; but it is a new top-level process, can't
+// reach the broker, and exits "Not logged in" — silently swallowed, so
+// unreviewed code sailed through. A plain terminal carries none of these, which
+// is why the same command authenticates there. Stripping them lets the reviewer
+// authenticate through the normal keychain/OAuth path. CLAUDE_CONFIG_DIR and
+// other non-CLAUDE_CODE_ vars are preserved, since they legitimately locate the
+// credentials.
+func reviewerEnv() []string {
+	var out []string
+	for _, kv := range os.Environ() {
+		if strings.HasPrefix(kv, "CLAUDE_CODE_") || strings.HasPrefix(kv, "CLAUDECODE=") {
+			continue
+		}
+		out = append(out, kv)
+	}
+	return out
 }

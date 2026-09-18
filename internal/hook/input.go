@@ -74,6 +74,13 @@ type EditInput struct {
 	ReplaceAll bool   `json:"replace_all,omitempty"`
 }
 
+// MultiEditInput is the tool_input for MultiEdit tool calls: several edits
+// applied to one file.
+type MultiEditInput struct {
+	FilePath string      `json:"file_path"`
+	Edits    []EditInput `json:"edits"`
+}
+
 // WebFetchInput is the tool_input for WebFetch tool calls.
 type WebFetchInput struct {
 	URL    string `json:"url"`
