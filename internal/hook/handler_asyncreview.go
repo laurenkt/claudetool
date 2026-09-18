@@ -255,6 +255,8 @@ FILE: %s
 //     OAuth/keychain credentials the reviewer relies on.
 //   - `--disallowed-tools` keeps the reviewer to pure text analysis; it never
 //     needs to touch the filesystem or run commands.
+//   - cmd.Env drops the host's CLAUDE_CODE_* / CLAUDECODE vars — see
+//     reviewerEnv for why.
 func runClaudeReview(prompt, model string) (string, error) {
 	cmd := exec.Command("claude",
 		"-p",
@@ -264,6 +266,7 @@ func runClaudeReview(prompt, model string) (string, error) {
 		"--disallowed-tools", "Bash Edit Write Read Glob Grep WebFetch WebSearch",
 		"--append-system-prompt", reviewerSystemPrompt,
 	)
+	cmd.Env = reviewerEnv()
 	cmd.Stdin = strings.NewReader(prompt)
 	out, err := cmd.Output()
 	if err != nil {
@@ -282,4 +285,29 @@ func runClaudeReview(prompt, model string) (string, error) {
 		return "", err
 	}
 	return string(out), nil
+}
+
+// reviewerEnv returns the process environment with the host Claude Code
+// session's markers removed: everything prefixed CLAUDE_CODE_ plus CLAUDECODE.
+//
+// When claudetool runs as a hook, the host exports child-session/auth-broker
+// vars — CLAUDE_CODE_CHILD_SESSION, CLAUDE_CODE_MESSAGING_SOCKET/TOKEN,
+// CLAUDE_CODE_SDK_HAS_{HOST_AUTH,OAUTH}_REFRESH, and CLAUDECODE=1. A freshly
+// spawned `claude -p` that inherits them believes it is a child session that
+// must fetch auth from the host broker; but it is a new top-level process, can't
+// reach the broker, and exits "Not logged in" — silently swallowed, so
+// unreviewed code sailed through. A plain terminal carries none of these, which
+// is why the same command authenticates there. Stripping them lets the reviewer
+// authenticate through the normal keychain/OAuth path. CLAUDE_CONFIG_DIR and
+// other non-CLAUDE_CODE_ vars are preserved, since they legitimately locate the
+// credentials.
+func reviewerEnv() []string {
+	var out []string
+	for _, kv := range os.Environ() {
+		if strings.HasPrefix(kv, "CLAUDE_CODE_") || strings.HasPrefix(kv, "CLAUDECODE=") {
+			continue
+		}
+		out = append(out, kv)
+	}
+	return out
 }

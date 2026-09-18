@@ -83,6 +83,40 @@ func TestAsyncReviewLogsRevise(t *testing.T) {
 	}
 }
 
+// reviewerEnv must drop the host's child-session/auth-broker markers (which
+// make a spawned claude expect host-brokered auth it can't reach) while keeping
+// everything else, including credential-locating vars.
+func TestReviewerEnvStripsHostSessionVars(t *testing.T) {
+	t.Setenv("CLAUDECODE", "1")
+	t.Setenv("CLAUDE_CODE_MESSAGING_SOCKET", "/tmp/x.sock")
+	t.Setenv("CLAUDE_CODE_CHILD_SESSION", "1")
+	t.Setenv("CLAUDE_CONFIG_DIR", "/home/me/.claude")
+	t.Setenv("PATH", "/usr/bin")
+
+	got := reviewerEnv()
+	has := func(prefix string) bool {
+		for _, kv := range got {
+			if strings.HasPrefix(kv, prefix) {
+				return true
+			}
+		}
+		return false
+	}
+
+	if has("CLAUDECODE=") {
+		t.Error("CLAUDECODE should be stripped")
+	}
+	if has("CLAUDE_CODE_") {
+		t.Error("CLAUDE_CODE_* should be stripped")
+	}
+	if !has("CLAUDE_CONFIG_DIR=") {
+		t.Error("CLAUDE_CONFIG_DIR must be preserved — it locates credentials")
+	}
+	if !has("PATH=") {
+		t.Error("unrelated vars must be preserved")
+	}
+}
+
 // Best-effort logging must never break the hook, even if the path is unwritable.
 func TestAsyncReviewLogFailureIsSilent(t *testing.T) {
 	asyncLogOverride = filepath.Join(t.TempDir(), "nonexistent-dir", "async.log")
