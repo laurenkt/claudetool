@@ -62,7 +62,7 @@ ones like `dump -o <path>` keep working. Handler names cannot begin with `-`.
 | `go-makeslice` | PostToolUse | `Write\|Edit` | Advisory (non-blocking): suggests `var x []T` instead of `make([]T, 0, n)` |
 | `go-named-func` | PostToolUse | `Write\|Edit` | Advisory (non-blocking): flags named anonymous functions (`name := func(...) {...}`); skips `_test.go` |
 | `go-cmp-or` | PostToolUse | `Write\|Edit` | Advisory (non-blocking): flags hand-rolled first-non-empty-string selectors (a value returned under an `x != ""` guard with a `return ""` fallback); points at `cmp.Or` |
-| `valuable-comments` | PostToolUse | `Write\|Edit` | **Async** ([see below](#async-review-hooks)): dispatches the changed `.go` code to a headless `claude` reviewer in the background; wakes the agent only when a comment restates the code, the name, or something that belongs in a validator |
+| `valuable-comments` | PostToolUse | `Write\|Edit` | **Async** ([see below](#async-review-hooks)): dispatches changed Go, JS/TS, Python, shell, and SQL code to a headless `claude` reviewer in the background; wakes the agent only when a comment restates the code, the name, or something that belongs in a validator |
 | `change-detector-tests` | PostToolUse | `Write\|Edit` | **Async** ([see below](#async-review-hooks)): reviews changed `_test.go` files and pushes back on change-detector tests (coupled to the implementation, not behaviour); leaves legitimate ones alone (codegen golden files, parsing/round-trip, characterization, security tripwires) |
 | `rpc-wrapper` | PostToolUse | `Write\|Edit` | **Async** ([see below](#async-review-hooks)): flags functions that are pointless thin wrappers around a single generated-client RPC call (`Request{…}.Send(ctx).DecodeResponse()` + trivial error-wrap + return a field); leaves wrappers that transform, orchestrate, or back an interface alone; skips `_test.go` |
 | `ci-watch` | PostToolUse | `Bash` | **Async** ([see below](#ci-watch)): after a `git push` / `gh pr create` / `gh pr ready`, watches the PR's CI checks in the background for up to 30 min and wakes the agent only if a check fails |
@@ -135,12 +135,16 @@ agent with the hook's stderr as a system reminder. So the handler returns:
 - **findings** → exit 2 with feedback → the agent is woken (a few seconds later)
   and can go back and revise.
 
-Two such checks ship today:
+Three such checks ship today:
 
 - `valuable-comments` judges whether comments in the changed code add value
   (explain *why*, cite scheme/schema docs or examples, clarify what names and
   validators can't) versus restate the implementation, the name, or a rule that
-  belongs in a proto/go validator.
+  belongs in a validator or the schema. It covers Go, JavaScript/TypeScript
+  (`.js`/`.jsx`/`.mjs`/`.cjs`/`.ts`/`.tsx`/`.mts`/`.cts`), Python
+  (`.py`/`.pyi`), shell (`.sh`/`.bash`/`.zsh`), and SQL — docstrings and JSDoc
+  blocks included. Extension-less shell scripts are missed, since the gate
+  matches on the file path.
 - `change-detector-tests` reviews changed `_test.go` files and pushes back on
   change-detector tests — ones coupled to the implementation rather than
   observable behaviour, which break on any refactor and catch no real bug. It
@@ -176,7 +180,7 @@ The reviewer model is a configurable tier — `FastCheap` (haiku),
 `MediumBalanced` (sonnet, the default), `SlowAccurate` (opus) — overridable per
 invocation with a flag: `claudetool hook valuable-comments -tier fast`.
 
-New async checks are a few lines: configure an `asyncReview` (file suffix,
+New async checks are a few lines: configure an `asyncReview` (file suffixes,
 default tier, a cheap `precheck` gate, and a `rubric`) and register its
 `handler()`. See `internal/hook/handler_asyncreview.go` and
 `internal/hook/handler_valuable_comments.go`.

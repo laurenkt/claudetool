@@ -4,12 +4,12 @@ import "strings"
 
 func init() {
 	Register("change-detector-tests", asyncReview{
-		name:       "change-detector-tests",
-		fileSuffix: "_test.go",
-		tier:       MediumBalanced, // sonnet by default; override with -tier
-		precheck:   looksLikeTestLogic,
-		rubric:     changeDetectorRubric,
-		summary:    "Async test review flagged a possible change-detector test:",
+		name:         "change-detector-tests",
+		fileSuffixes: []string{"_test.go"},
+		tier:         MediumBalanced, // sonnet by default; override with -tier
+		precheck:     looksLikeTestLogic,
+		rubric:       changeDetectorRubric,
+		summary:      "Async test review flagged a possible change-detector test:",
 	}.handler())
 }
 

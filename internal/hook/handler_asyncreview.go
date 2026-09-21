@@ -104,13 +104,13 @@ func tierFromArgs(args []string, def ReviewTier) ReviewTier {
 // the background without blocking the working agent, and only wakes it (via
 // exit 2 + stderr) when the reviewer returns findings.
 type asyncReview struct {
-	name       string                 // handler name, e.g. "valuable-comments"
-	fileSuffix string                 // required file suffix, e.g. ".go"
-	skipSuffix string                 // optional suffix to skip, e.g. "_test.go" ("" = none)
-	tier       ReviewTier             // default model tier
-	precheck   func(text string) bool // cheap gate: only dispatch when true (nil = always)
-	rubric     string                 // review criteria embedded in the reviewer prompt
-	summary    string                 // header line prepended to REVISE feedback
+	name         string                 // handler name, e.g. "valuable-comments"
+	fileSuffixes []string               // required file suffixes, any one matches (nil = any file)
+	skipSuffix   string                 // optional suffix to skip, e.g. "_test.go" ("" = none)
+	tier         ReviewTier             // default model tier
+	precheck     func(text string) bool // cheap gate: only dispatch when true (nil = always)
+	rubric       string                 // review criteria embedded in the reviewer prompt
+	summary      string                 // header line prepended to REVISE feedback
 
 	// review runs the reviewer and returns its raw output. Injected in tests;
 	// nil falls back to runClaudeReview against the real `claude` binary.
@@ -130,7 +130,7 @@ func (a asyncReview) handler() Handler {
 		if filePath == "" {
 			return nil, nil
 		}
-		if a.fileSuffix != "" && !strings.HasSuffix(filePath, a.fileSuffix) {
+		if !matchesSuffix(filePath, a.fileSuffixes) {
 			return nil, nil
 		}
 		if a.skipSuffix != "" && strings.HasSuffix(filePath, a.skipSuffix) {
@@ -172,6 +172,20 @@ func (a asyncReview) handler() Handler {
 		// surfaces back to the working agent.
 		return nil, fmt.Errorf("%s\n\n%s", a.summary, feedback)
 	}
+}
+
+// matchesSuffix reports whether filePath ends in one of suffixes. An empty
+// list means the check is not scoped to a language and accepts any file.
+func matchesSuffix(filePath string, suffixes []string) bool {
+	if len(suffixes) == 0 {
+		return true
+	}
+	for _, s := range suffixes {
+		if strings.HasSuffix(filePath, s) {
+			return true
+		}
+	}
+	return false
 }
 
 // changedContent extracts the file path and the newly written/edited text from

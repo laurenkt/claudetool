@@ -4,13 +4,13 @@ import "strings"
 
 func init() {
 	Register("rpc-wrapper", asyncReview{
-		name:       "rpc-wrapper",
-		fileSuffix: ".go",
-		skipSuffix: "_test.go",
-		tier:       MediumBalanced, // sonnet by default; override with -tier
-		precheck:   looksLikeRPCWrapper,
-		rubric:     rpcWrapperRubric,
-		summary:    "Async review flagged a possibly pointless RPC wrapper:",
+		name:         "rpc-wrapper",
+		fileSuffixes: []string{".go"},
+		skipSuffix:   "_test.go",
+		tier:         MediumBalanced, // sonnet by default; override with -tier
+		precheck:     looksLikeRPCWrapper,
+		rubric:       rpcWrapperRubric,
+		summary:      "Async review flagged a possibly pointless RPC wrapper:",
 	}.handler())
 }
 

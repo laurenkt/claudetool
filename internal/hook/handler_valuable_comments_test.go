@@ -20,11 +20,11 @@ func newReview(t *testing.T, verdict string) (asyncReview, *struct {
 		model  string
 	}{}
 	a := asyncReview{
-		name:       "valuable-comments",
-		fileSuffix: ".go",
-		tier:       MediumBalanced,
-		precheck:   containsGoComment,
-		rubric:     valuableCommentsRubric,
+		name:         "valuable-comments",
+		fileSuffixes: valuableCommentSuffixes,
+		tier:         MediumBalanced,
+		precheck:     containsComment,
+		rubric:       valuableCommentsRubric,
 		review: func(prompt, model string) (string, error) {
 			rec.called = true
 			rec.prompt = prompt
@@ -67,17 +67,58 @@ func TestValuableCommentsPrecheckSkipsNoComment(t *testing.T) {
 	}
 }
 
-func TestValuableCommentsSkipsNonGo(t *testing.T) {
+func TestValuableCommentsSkipsUnsupportedLanguage(t *testing.T) {
+	for _, path := range []string{"/src/X.java", "/src/main.rb", "/notes/README.md"} {
+		a, rec := newReview(t, "REVISE\n- bad")
+		out, err := invoke(t, a, "Write", WriteInput{
+			FilePath: path,
+			Content:  "// increment\ni++;\n",
+		})
+		if err != nil || out != nil {
+			t.Fatalf("%s: want nil/nil, got out=%+v err=%v", path, out, err)
+		}
+		if rec.called {
+			t.Errorf("%s: reviewer should not be called for an unsupported language", path)
+		}
+	}
+}
+
+func TestValuableCommentsDispatchesPerLanguage(t *testing.T) {
+	cases := []struct {
+		path string
+		text string
+	}{
+		{"/src/x.go", "// increment i\ni++"},
+		{"/src/x.js", "// increment i\ni++"},
+		{"/src/x.tsx", "/* increment i */\ni++"},
+		{"/src/x.py", "# increment i\ni += 1"},
+		{"/src/x.py", `"""Returns the user."""`},
+		{"/src/x.sh", "# increment i\ni=$((i+1))"},
+		{"/src/q.sql", "-- select the active users\nSELECT * FROM users WHERE active"},
+		{"/src/x.ts", "const n = 1 // the number one"},
+	}
+	for _, c := range cases {
+		a, rec := newReview(t, "PASS")
+		if _, err := invoke(t, a, "Write", WriteInput{FilePath: c.path, Content: c.text}); err != nil {
+			t.Fatalf("%s: unexpected error %v", c.path, err)
+		}
+		if !rec.called {
+			t.Errorf("%s: reviewer should be called for %q", c.path, c.text)
+		}
+	}
+}
+
+func TestValuableCommentsPrecheckIgnoresShellFlags(t *testing.T) {
 	a, rec := newReview(t, "REVISE\n- bad")
 	out, err := invoke(t, a, "Write", WriteInput{
-		FilePath: "/src/x.py",
-		Content:  "# increment\ni += 1\n",
+		FilePath: "/src/deploy.sh",
+		Content:  "set -euo pipefail\ncurl --fail --silent https://example.com\n",
 	})
 	if err != nil || out != nil {
 		t.Fatalf("want nil/nil, got out=%+v err=%v", out, err)
 	}
 	if rec.called {
-		t.Error("reviewer should not be called for non-.go files")
+		t.Error("a trailing CLI flag is not a comment; reviewer should not be called")
 	}
 }
 

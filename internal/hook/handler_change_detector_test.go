@@ -9,12 +9,12 @@ func newDetectorReview(t *testing.T, verdict string) (asyncReview, *bool) {
 	t.Helper()
 	called := new(bool)
 	a := asyncReview{
-		name:       "change-detector-tests",
-		fileSuffix: "_test.go",
-		tier:       MediumBalanced,
-		precheck:   looksLikeTestLogic,
-		rubric:     changeDetectorRubric,
-		summary:    "Async test review flagged a possible change-detector test:",
+		name:         "change-detector-tests",
+		fileSuffixes: []string{"_test.go"},
+		tier:         MediumBalanced,
+		precheck:     looksLikeTestLogic,
+		rubric:       changeDetectorRubric,
+		summary:      "Async test review flagged a possible change-detector test:",
 		review: func(prompt, model string) (string, error) {
 			*called = true
 			return verdict, nil

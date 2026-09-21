@@ -9,13 +9,13 @@ func newRPCWrapperReview(t *testing.T, verdict string) (asyncReview, *bool) {
 	t.Helper()
 	called := new(bool)
 	a := asyncReview{
-		name:       "rpc-wrapper",
-		fileSuffix: ".go",
-		skipSuffix: "_test.go",
-		tier:       MediumBalanced,
-		precheck:   looksLikeRPCWrapper,
-		rubric:     rpcWrapperRubric,
-		summary:    "Async review flagged a possibly pointless RPC wrapper:",
+		name:         "rpc-wrapper",
+		fileSuffixes: []string{".go"},
+		skipSuffix:   "_test.go",
+		tier:         MediumBalanced,
+		precheck:     looksLikeRPCWrapper,
+		rubric:       rpcWrapperRubric,
+		summary:      "Async review flagged a possibly pointless RPC wrapper:",
 		review: func(prompt, model string) (string, error) {
 			*called = true
 			return verdict, nil
