@@ -22,11 +22,12 @@ var valuableCommentSuffixes = []string{
 	".py", ".pyi",
 	".sh", ".bash", ".zsh",
 	".sql",
+	".yml", ".yaml",
 }
 
 // containsComment reports whether text plausibly introduces a comment in any
 // of the languages this check covers: `//` and `/* */` (Go, JS, TS), `#`
-// (Python, shell), `--` (SQL), and `"""` / `”'` (Python docstrings).
+// (Python, shell, YAML), `--` (SQL), and `"""` / `”'` (Python docstrings).
 //
 // Deliberately cheap and slightly over-eager: a borderline hit (a `//` inside
 // a string, a JS private field `#count`) just costs one reviewer call that
@@ -51,7 +52,7 @@ func containsComment(text string) bool {
 	return false
 }
 
-const valuableCommentsRubric = `You are reviewing the comments in a code change. The language is whatever the FILE path below indicates — Go, JavaScript, TypeScript, Python, shell, or SQL. Judge only the comments (including docstrings, JSDoc/TSDoc blocks, and SQL ` + "`--`" + ` notes) — not the code's correctness, style, or naming.
+const valuableCommentsRubric = `You are reviewing the comments in a code change. The language is whatever the FILE path below indicates — Go, JavaScript, TypeScript, Python, shell, SQL, or YAML. Judge only the comments (including docstrings, JSDoc/TSDoc blocks, and SQL ` + "`--`" + ` notes) — not the code's correctness, style, or naming.
 
 A comment ADDS VALUE when it tells the reader something the code cannot:
 
@@ -64,7 +65,7 @@ A comment ADDS NO VALUE when:
 
 - It restates the implementation — narrating what the next line(s) already say ("increment i" above i++; "loop over users" above a loop; "select active users" above a WHERE clause that says active).
 - It just restates the name of the thing ("// UserID is the user ID", "// Start starts the server", "# constructor for Foo", a docstring reading """Returns the user.""" on get_user).
-- It describes a rule that belongs in, or is already enforced by, a validator or the schema — a proto field option (e.g. a buf.validate / protoc-gen-validate constraint), a Go struct-tag validator annotation, a zod/Pydantic schema, or a SQL column constraint ("-- must not be empty", "// max 32 chars") — the constraint should live on the field or column, not in prose.
+- It describes a rule that belongs in, or is already enforced by, a validator or the schema — a proto field option (e.g. a buf.validate / protoc-gen-validate constraint), a Go struct-tag validator annotation, a zod/Pydantic schema, a SQL column constraint ("-- must not be empty", "// max 32 chars"), or a YAML key whose value is already enforced by a JSON Schema (a Helm ` + "`values.schema.json`" + `, a CRD, an OpenAPI spec) — the constraint should live on the schema, not in a ` + "`#`" + ` note.
 - It is boilerplate or filler ("TODO" with no content, banner comments, a docstring that only repeats the parameter list and types the signature already declares).
 - It refers to the change itself rather than the code's steady state — past edits, the diff, or PR feedback ("now we also do Y", "we need this because we're changing X", "as discussed, switched to Z"). A comment is read in the future, when that change is simply how things have always been; it must justify the code going forward, not narrate how it got here.
 - It describes HOW the implementation works. The code already shows how; if the reader can see it by reading the lines below, the comment is dead weight.
