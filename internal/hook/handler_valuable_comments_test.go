@@ -96,6 +96,8 @@ func TestValuableCommentsDispatchesPerLanguage(t *testing.T) {
 		{"/src/x.sh", "# increment i\ni=$((i+1))"},
 		{"/src/q.sql", "-- select the active users\nSELECT * FROM users WHERE active"},
 		{"/src/x.ts", "const n = 1 // the number one"},
+		{"/src/x.yml", "# the number of replicas\nreplicas: 3"},
+		{"/src/x.yaml", "replicas: 1 # one replica"},
 	}
 	for _, c := range cases {
 		a, rec := newReview(t, "PASS")
