@@ -308,6 +308,8 @@ func segmentIsReadOnly(seg string) bool {
 		return bqIsReadOnly(args)
 	case "docker":
 		return dockerIsReadOnly(args)
+	case "xargs":
+		return xargsIsReadOnly(args)
 	case "execute-in-data-shell":
 		return dataShellIsReadOnly(args)
 	case "adbt", "model-routing", "run-data-standards", "modelgen":
@@ -377,6 +379,45 @@ func findIsReadOnly(args []string) bool {
 		}
 	}
 	return true
+}
+
+// xargsValueFlags are xargs flags that consume a following separate argument
+// (e.g. `-n 4`, `-I {}`). Their attached (`-n4`) and long `--flag=value` forms
+// are self-contained and handled without a lookahead.
+var xargsValueFlags = map[string]bool{
+	"-a": true, "-E": true, "-I": true, "-L": true, "-n": true, "-P": true, "-s": true, "-d": true,
+	"--arg-file": true, "--eof": true, "--replace": true, "--max-lines": true,
+	"--max-args": true, "--max-procs": true, "--max-chars": true, "--delimiter": true,
+	"--process-slot-var": true,
+}
+
+// xargsIsReadOnly reports whether an `xargs` invocation only runs a read-only
+// command. xargs is a wrapper: its safety is the safety of the command it
+// executes. We skip xargs's own flags (including the ones that take a separate
+// value) and recurse into the wrapped command via segmentIsReadOnly, so
+// `find … | xargs grep -l …` approves while `… | xargs rm` still prompts.
+func xargsIsReadOnly(args []string) bool {
+	i := 0
+	for i < len(args) {
+		a := unquote(args[i])
+		if !strings.HasPrefix(a, "-") {
+			break // first non-flag token is the wrapped command word
+		}
+		// `--flag=value` and attached short forms (`-n4`, `-I{}`) are self-contained.
+		if strings.Contains(a, "=") {
+			i++
+			continue
+		}
+		if xargsValueFlags[a] {
+			i += 2 // flag plus its separate value
+			continue
+		}
+		i++ // boolean flag, or attached-value short flag
+	}
+	if i >= len(args) {
+		return false // bare xargs with no wrapped command -> prompt
+	}
+	return segmentIsReadOnly(strings.Join(args[i:], " "))
 }
 
 // bqReadSubcmds are `bq` subcommands that only read metadata or a tiny row
