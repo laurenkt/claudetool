@@ -281,17 +281,24 @@ FILE: %s
 //     intermittent failure that let unreviewed code through. We do NOT use
 //     `--bare`: it forces auth to ANTHROPIC_API_KEY only, never reading the
 //     OAuth/keychain credentials the reviewer relies on.
-//   - `--disallowed-tools` keeps the reviewer to pure text analysis; it never
-//     needs to touch the filesystem or run commands.
+//   - `--safe-mode` skips the host repo's CLAUDE.md and memory but, unlike
+//     `--bare`, keeps OAuth.
+//   - `--tools ""` keeps the reviewer to pure text analysis and drops the tool
+//     definitions from the prompt; it never needs to touch the filesystem.
+//   - `--no-session-persistence` stops each review writing a transcript into
+//     the host project's session folder.
 //   - cmd.Env drops the host's CLAUDE_CODE_* / CLAUDECODE vars — see
 //     reviewerEnv for why.
 func runClaudeReview(prompt, model string) (string, error) {
-	cmd := exec.Command("claude",
+	cmd := exec.Command(
+		"claude",
 		"-p",
 		"--model", model,
 		"--settings", "{}",
 		"--strict-mcp-config",
-		"--disallowed-tools", "Bash Edit Write Read Glob Grep WebFetch WebSearch",
+		"--safe-mode",
+		"--tools", "",
+		"--no-session-persistence",
 		"--append-system-prompt", reviewerSystemPrompt,
 	)
 	cmd.Env = reviewerEnv()
